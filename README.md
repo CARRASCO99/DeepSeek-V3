@@ -359,3 +359,5 @@ This code repository is licensed under [the MIT License](LICENSE-CODE). The use 
 
 ## 9. Contact
 If you have any questions, please raise an issue or contact us at [service@deepseek.com](service@deepseek.com).
+
+For optional local codebase analysis with Desktop Commander, see the [contributor setup and safety notes](docs/desktop-commander.md) and the [reusable analysis prompt](.github/prompts/desktop-commander-codebase-analysis.prompt.md).

@@ -48,8 +48,18 @@ def generate(
     Returns:
         List[List[int]]: A list of lists containing the generated tokens for each sequence.
     """
+    if not prompt_tokens:
+        raise ValueError("At least one prompt is required")
+    if len(prompt_tokens) > model.max_batch_size:
+        raise ValueError(f"Batch size exceeds model maximum ({model.max_batch_size})")
+    if any(not tokens for tokens in prompt_tokens):
+        raise ValueError("Prompts must contain at least one token")
+    if max_new_tokens < 0:
+        raise ValueError("max_new_tokens must be non-negative")
+
     prompt_lens = [len(t) for t in prompt_tokens]
-    assert max(prompt_lens) <= model.max_seq_len, f"Prompt length exceeds model maximum sequence length (max_seq_len={model.max_seq_len})"
+    if max(prompt_lens) > model.max_seq_len:
+        raise ValueError(f"Prompt length exceeds model maximum sequence length (max_seq_len={model.max_seq_len})")
     total_len = min(model.max_seq_len, max_new_tokens + max(prompt_lens))
     tokens = torch.full((len(prompt_tokens), total_len), -1, dtype=torch.long, device="cuda")
     for i, t in enumerate(prompt_tokens):
@@ -97,6 +107,11 @@ def main(
         max_new_tokens (int, optional): Maximum number of new tokens to generate. Defaults to 100.
         temperature (float, optional): Temperature for sampling. Defaults to 1.0.
     """
+    if interactive == bool(input_file):
+        raise ValueError("Provide exactly one of interactive mode or an input file")
+    if max_new_tokens < 0:
+        raise ValueError("max_new_tokens must be non-negative")
+
     world_size = int(os.getenv("WORLD_SIZE", "1"))
     rank = int(os.getenv("RANK", "0"))
     local_rank = int(os.getenv("LOCAL_RANK", "0"))
@@ -171,15 +186,19 @@ if __name__ == "__main__":
         --temperature (float, optional): Temperature for sampling. Defaults to 0.2.
 
     Raises:
-        AssertionError: If neither input-file nor interactive mode is specified.
+        SystemExit: If neither input-file nor interactive mode is specified, or both are provided.
     """
     parser = ArgumentParser()
     parser.add_argument("--ckpt-path", type=str, required=True)
     parser.add_argument("--config", type=str, required=True)
-    parser.add_argument("--input-file", type=str, default="")
-    parser.add_argument("--interactive", action="store_true")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--input-file", type=str)
+    mode.add_argument("--interactive", action="store_true")
     parser.add_argument("--max-new-tokens", type=int, default=200)
     parser.add_argument("--temperature", type=float, default=0.2)
     args = parser.parse_args()
-    assert args.input_file or args.interactive, "Either input-file or interactive mode must be specified"
+    if args.input_file == "":
+        parser.error("--input-file must not be empty")
+    if args.max_new_tokens < 0:
+        parser.error("--max-new-tokens must be non-negative")
     main(args.ckpt_path, args.config, args.input_file, args.interactive, args.max_new_tokens, args.temperature)
