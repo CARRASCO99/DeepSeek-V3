@@ -29,12 +29,26 @@ def main(fp8_path, bf16_path):
     - The function caches loaded safetensor files to optimize memory usage.
     - The function updates the model index file to remove references to scale_inv tensors.
     """
-    torch.set_default_dtype(torch.bfloat16)
-    os.makedirs(bf16_path, exist_ok=True)
     model_index_file = os.path.join(fp8_path, "model.safetensors.index.json")
+    if not torch.cuda.is_available():
+        raise RuntimeError("FP8-to-BF16 conversion requires a CUDA-enabled PyTorch installation and GPU")
+    if os.path.normcase(os.path.realpath(fp8_path)) == os.path.normcase(os.path.realpath(bf16_path)):
+        raise ValueError("Input and output directories must be different")
+    if not os.path.isfile(model_index_file):
+        raise FileNotFoundError(f"Model index file not found: {model_index_file}")
+
     with open(model_index_file, "r") as f:
         model_index = json.load(f)
     weight_map = model_index["weight_map"]
+    if not isinstance(weight_map, dict):
+        raise ValueError(f"Invalid model index: weight_map must be an object in {model_index_file}")
+
+    safetensor_files = sorted(glob(os.path.join(fp8_path, "*.safetensors")))
+    if not safetensor_files:
+        raise FileNotFoundError(f"No safetensors checkpoint files found in {fp8_path}")
+
+    torch.set_default_dtype(torch.bfloat16)
+    os.makedirs(bf16_path, exist_ok=True)
     
     # Cache for loaded safetensor files
     loaded_files = {}
@@ -60,8 +74,6 @@ def main(fp8_path, bf16_path):
             loaded_files[file_name] = load_file(file_path, device="cuda")
         return loaded_files[file_name][tensor_name]
 
-    safetensor_files = list(glob(os.path.join(fp8_path, "*.safetensors")))
-    safetensor_files.sort()
     for safetensor_file in tqdm(safetensor_files):
         file_name = os.path.basename(safetensor_file)
         current_state_dict = load_file(safetensor_file, device="cuda")
@@ -73,14 +85,11 @@ def main(fp8_path, bf16_path):
                 continue
             elif weight.element_size() == 1:  # FP8 weight
                 scale_inv_name = f"{weight_name}_scale_inv"
-                try:
-                    # Get scale_inv from the correct file
-                    scale_inv = get_tensor(scale_inv_name)
-                    fp8_weight_names.append(weight_name)
-                    new_state_dict[weight_name] = weight_dequant(weight, scale_inv)
-                except KeyError:
-                    print(f"Warning: Missing scale_inv tensor for {weight_name}, skipping conversion")
-                    new_state_dict[weight_name] = weight
+                if scale_inv_name not in weight_map:
+                    raise KeyError(f"Missing scale_inv tensor for FP8 weight {weight_name}")
+                scale_inv = get_tensor(scale_inv_name)
+                fp8_weight_names.append(weight_name)
+                new_state_dict[weight_name] = weight_dequant(weight, scale_inv)
             else:
                 new_state_dict[weight_name] = weight
                 

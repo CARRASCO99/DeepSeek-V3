@@ -43,11 +43,21 @@ def main(hf_ckpt_path, save_path, n_experts, mp):
     Returns:
         None
     """
+    if n_experts <= 0:
+        raise ValueError("n_experts must be a positive integer")
+    if mp <= 0:
+        raise ValueError("model_parallel must be a positive integer")
+    if n_experts % mp != 0:
+        raise ValueError("Number of experts must be divisible by model parallelism")
+
     torch.set_num_threads(8)
     n_local_experts = n_experts // mp
     state_dicts = [{} for _ in range(mp)]
 
-    for file_path in tqdm(glob(os.path.join(hf_ckpt_path, "*.safetensors"))):
+    checkpoint_files = glob(os.path.join(hf_ckpt_path, "*.safetensors"))
+    if not checkpoint_files:
+        raise FileNotFoundError(f"No safetensors checkpoint files found in {hf_ckpt_path}")
+    for file_path in tqdm(checkpoint_files):
         with safe_open(file_path, framework="pt", device="cpu") as f:
             for name in f.keys():
                 if "model.layers.61" in name:
@@ -92,5 +102,4 @@ if __name__ == "__main__":
     parser.add_argument("--n-experts", type=int, required=True)
     parser.add_argument("--model-parallel", type=int, required=True)
     args = parser.parse_args()
-    assert args.n_experts % args.model_parallel == 0, "Number of experts must be divisible by model parallelism"
     main(args.hf_ckpt_path, args.save_path, args.n_experts, args.model_parallel)

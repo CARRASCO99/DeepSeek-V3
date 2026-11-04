@@ -230,7 +230,7 @@ class ColumnParallelLinear(Linear):
         Returns:
             torch.Tensor: Transformed tensor with column-parallel computation.
         """
-        y = linear(x, self.weight, self.bias)
+        y = linear(x, self.weight, self.bias, self.scale_fmt)
         return y
 
 
@@ -259,7 +259,7 @@ class RowParallelLinear(Linear):
         Returns:
             torch.Tensor: Transformed tensor with row-parallel computation.
         """
-        y = linear(x, self.weight)
+        y = linear(x, self.weight, scale_fmt=self.scale_fmt)
         if world_size > 1:
             dist.all_reduce(y)
         if self.bias is not None:
@@ -761,6 +761,7 @@ class Transformer(nn.Module):
         Linear.scale_fmt = args.scale_fmt
         super().__init__()
         self.max_seq_len = args.max_seq_len
+        self.max_batch_size = args.max_batch_size
         self.embed = ParallelEmbedding(args.vocab_size, args.dim)
         self.layers = torch.nn.ModuleList()
         for layer_id in range(args.n_layers):
